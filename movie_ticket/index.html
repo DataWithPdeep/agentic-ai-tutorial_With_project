@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Book your seat</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #e4eaf3;
+    --ink: #0f1b33;
+    --muted: #5b6785;
+    --paper: #ffffff;
+    --seat: #b3263e;
+    --gold: #f2b705;
+    --ok: #1d7a4f;
+    --line: #c8d2e3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0f1b33; --ink:#eef2fa; --muted:#9aa7c4; --paper:#182647; --line:#2b3b66; }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: "Archivo", system-ui, sans-serif; line-height: 1.5;
+    display: flex; justify-content: center;
+  }
+  .app { width: 100%; max-width: 640px; height: 100%; display: flex; flex-direction: column; padding: 20px 16px 12px; }
+  h1 { font-size: clamp(2rem, 7vw, 3rem); font-weight: 800; line-height: 1; letter-spacing: -0.03em; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 16px; }
+  #log { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 4px 2px 12px; }
+  .msg, .ticket { flex-shrink: 0; }  /* never squash cards inside the scrolling chat */
+  .msg { max-width: 88%; padding: 10px 14px; border-radius: 14px; background: var(--paper); border: 1px solid var(--line); white-space: pre-wrap; }
+  .msg.me { align-self: flex-end; background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .msg.err { border-color: var(--seat); color: var(--seat); }
+
+  /* ticket card: used for booking summaries and confirmations */
+  .ticket { align-self: stretch; background: var(--paper); border: 1px solid var(--line); border-radius: 10px;
+            display: grid; grid-template-columns: 1fr auto; position: relative; overflow: hidden; }
+  .ticket .main { padding: 14px 16px; }
+  .ticket .stub { padding: 14px 16px; border-left: 2px dashed var(--line); display: grid; place-content: center; text-align: center; min-width: 96px; }
+  .ticket h2 { margin: 0 0 6px; font-size: 1.25rem; font-weight: 800; }
+  .ticket dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font-size: .93rem; }
+  .ticket dt { color: var(--muted); }
+  .ticket dd { margin: 0; font-weight: 500; }
+  .ticket .stub b { font-size: 1.6rem; font-weight: 800; line-height: 1; }
+  .ticket .stub span { font-size: .8rem; color: var(--muted); }
+  .ticket.ok { border-left: 6px solid var(--ok); }
+  .ticket.pending { border-left: 6px solid var(--gold); }
+  .ticket::before, .ticket::after { content: ""; position: absolute; right: 85px; width: 16px; height: 16px; background: var(--bg); border-radius: 50%; }
+  .ticket::before { top: -8px; } .ticket::after { bottom: -8px; }
+
+  .actions { display: flex; gap: 8px; margin-top: 12px; }
+  button { font: inherit; cursor: pointer; border-radius: 10px; padding: 9px 16px; border: 1px solid var(--ink); background: transparent; color: var(--ink); }
+  button.primary { background: var(--seat); border-color: var(--seat); color: #fff; font-weight: 500; }
+  button:disabled { opacity: .5; cursor: default; }
+  :focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+  .chips button { font-size: .88rem; padding: 6px 12px; border-color: var(--line); background: var(--paper); }
+
+  form { display: flex; gap: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+  input { flex: 1; font: inherit; padding: 11px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); }
+  .typing { color: var(--muted); font-style: italic; }
+  @media (prefers-reduced-motion: no-preference) { .msg, .ticket { animation: in .18s ease-out; } }
+  @keyframes in { from { opacity: 0; transform: translateY(4px); } }
+</style>
+</head>
+<body>
+<main class="app">
+  <header>
+    <h1>Book your seat</h1>
+    <p class="sub">Ask for today's movies, book tickets, or check a booking.</p>
+  </header>
+
+  <div id="log" aria-live="polite"></div>
+
+  <div class="chips" id="chips">
+    <button type="button" data-send="1">Show all movies</button>
+    <button type="button" data-send="1">Details of Avengers</button>
+    <button type="button">Book 2 tickets for Avengers, my name is </button>
+    <button type="button">Status of booking 1, my name is </button>
+  </div>
+
+  <form id="form">
+    <input id="input" autocomplete="off" placeholder="e.g. I am Prateek, book 2 seats for Avengers" aria-label="Your message">
+    <button class="primary" id="send">Send</button>
+  </form>
+</main>
+
+<script>
+const CURRENCY = "₹";            // change to "$" if your prices are in dollars
+const money = n => CURRENCY + Number(n).toLocaleString(undefined, { maximumFractionDigits: 2 });
+const log = document.getElementById("log");
+const input = document.getElementById("input");
+const sendBtn = document.getElementById("send");
+
+const label = k => k.replace(/_/g, " ").replace(/^./, c => c.toUpperCase());
+
+function el(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined) n.textContent = text;
+  return n;
+}
+function scroll() { log.scrollTop = log.scrollHeight; }
+function say(text, cls = "") { const m = el("div", "msg " + cls, text); log.append(m); scroll(); return m; }
+
+// Ticket-style card from a plain object. textContent is used everywhere, so no HTML injection.
+function ticket(title, obj, kind, stubBig, stubSmall) {
+  const t = el("div", "ticket " + (kind || ""));
+  const main = el("div", "main");
+  main.append(el("h2", "", title));
+  const dl = el("dl");
+  for (const [k, v] of Object.entries(obj)) {
+    if (v === null || v === undefined || v === "" || typeof v === "object") continue;
+    dl.append(el("dt", "", label(k)), el("dd", "", String(v)));
+  }
+  main.append(dl);
+  t.append(main);
+  if (stubBig) {
+    const s = el("div", "stub");
+    s.append(el("b", "", stubBig), el("span", "", stubSmall || ""));
+    t.append(s);
+  }
+  log.append(t); scroll();
+  return t;
+}
+
+function movieCard(m, inList) {
+  const t = ticket(m.title, {
+    genre: m.genre,
+    show_time: m.show_time,
+    seats_left: m.available_seats + " of " + m.total_seats,
+    movie_id: m.id
+  }, m.available_seats > 0 ? "" : "pending", money(m.price_per_seat), "per seat");
+
+  const box = el("div", "actions");
+  if (inList) {
+    const det = el("button", "", "Details");
+    det.onclick = () => send("Details of " + m.title);
+    box.append(det);
+  }
+  const book = el("button", "primary", m.available_seats > 0 ? "Book seats" : "Sold out");
+  book.disabled = m.available_seats <= 0;
+  book.onclick = () => {
+    input.value = "Book 2 tickets for " + m.title + ", my name is ";
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+  };
+  box.append(book);
+  t.querySelector(".main").append(box);
+  return t;
+}
+
+function render(r) {
+  if (r.status === "error") return say("Something went wrong: " + r.message, "err");
+
+  if (r.status === "confirm") {
+    const s = r.summary || {};
+    const t = ticket(s.movie || "Confirm booking", {
+      name: s.customer, seats: s.seats, total: s.total_amount != null ? money(s.total_amount) : null
+    }, "pending", s.seats ? s.seats + "×" : "", "seats");
+    const box = el("div", "actions");
+    const yes = el("button", "primary", "Confirm booking");
+    const no = el("button", "", "Cancel");
+    const answer = async a => {
+      yes.disabled = no.disabled = true;
+      render(await call("/api/confirm", { thread_id: r.thread_id, answer: a }));
+    };
+    yes.onclick = () => answer("yes");
+    no.onclick = () => answer("no");
+    box.append(yes, no);
+    t.querySelector(".main").append(box);
+    return;
+  }
+
+  const d = r.data || {};
+  if (d.error) {
+    say(d.error, "err");
+    if (Array.isArray(d.available_movies)) say("Available movies: " + d.available_movies.join(", "));
+    return;
+  }
+  if (d.booking_id) {
+    return ticket(d.title || "Booking #" + d.booking_id, {
+      status: d.status, movie: d.movie, show_time: d.show_time,
+      customer: d.customer, seats: d.seats, total_paid: money(d.total_paid)
+    }, d.status === "confirmed" ? "ok" : "pending", "#" + d.booking_id, "booking id");
+  }
+  if (d.movie && typeof d.movie === "object") return movieCard(d.movie);
+  if (Array.isArray(d.all_movies)) { d.all_movies.forEach(m => movieCard(m, true)); return; }
+  if (d.message) return say(d.message);
+  say(r.result || "Done.");
+}
+
+async function call(url, body) {
+  const typing = say("Working on it…", "typing");
+  try {
+    const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const out = await res.json();
+    if (!res.ok) return { status: "error", message: out.detail || out.message || "Request failed." };
+    return out;
+  } catch (e) {
+    return { status: "error", message: "Could not reach the server." };
+  } finally { typing.remove(); }
+}
+
+async function send(text) {
+  text = text.trim();
+  if (!text || sendBtn.disabled) return;
+  input.value = ""; sendBtn.disabled = true;
+  say(text, "me");
+  render(await call("/api/chat", { message: text }));
+  sendBtn.disabled = false; input.focus();
+}
+
+document.getElementById("form").addEventListener("submit", e => {
+  e.preventDefault();
+  send(input.value);
+});
+
+document.getElementById("chips").addEventListener("click", e => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  if (b.dataset.send) return send(b.textContent);   // complete questions are sent right away
+  input.value = b.textContent; input.focus();        // others need your name / booking id first
+});
+
+say("Hi! Tell me which movie you want and how many seats. For example: “I am Prateek, book 2 seats for Avengers.”");
+</script>
+</body>
+</html>
