@@ -1,0 +1,8 @@
+langchain
+langgraph
+langchain-groq
+langchain-openai
+dotenv
+pydantic
+langgraph-checkpoint-sqlite
+sqlalchemy

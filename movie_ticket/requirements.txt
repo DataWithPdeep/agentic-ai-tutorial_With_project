@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+sqlalchemy
+python-dotenv
+langgraph
+langgraph-checkpoint-sqlite
+langchain-groq
+pydantic
+# for Postgres in production: psycopg2-binary
